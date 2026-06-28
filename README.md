@@ -1,30 +1,30 @@
 # 🌎 P2P Country Monitor
 
-Dashboard de monitoramento operacional para plataformas P2P multi-país, construído como protótipo de portfólio.
+Operational monitoring dashboard for multi-country P2P financial platforms, built as a portfolio prototype.
 
-## Funcionalidades
+## Features
 
-- **Visão geral** de todos os países com status por cor (verde/amarelo/vermelho) baseado na variação de volume diário
-- **Ranking bar** com países ordenados por performance, clicáveis para detalhes
-- **Cards por país** com volume, projeção mensal, liquidez, merchants, usuários e pedidos
-- **Modal de detalhes** com slider de liquidez buy/sell, tempo médio de pedidos, comparativo com mesmo dia do mês anterior
-- **Alertas visuais** para pedidos antigos e não aceitos
-- **Threshold configurável** por país para alertas de tempo
-- **Auto-refresh** a cada 15 minutos com contador regressivo
+- **Country overview** with color-coded status (green/yellow/red) based on daily volume variation
+- **Ranking bar** with countries sorted by performance, clickable for details
+- **Per-country cards** showing volume, monthly projection, liquidity, merchants, users, and orders
+- **Detail modal** with buy/sell liquidity slider, average order time bar, and comparison vs same day last month
+- **Visual alerts** for old and unaccepted orders
+- **Configurable threshold** per country for time-based alerts
+- **Auto-refresh** every 15 minutes with countdown timer
 
-## Contexto
+## Context
 
-Protótipo criado para demonstrar monitoramento operacional de uma plataforma P2P financeira multi-país (América Latina). O sistema foi desenhado para escalar de 8 para 40+ países, tornando inviável o monitoramento manual um a um.
+Prototype built to demonstrate operational monitoring of a multi-country P2P financial platform (Latin America). The system was designed to scale from 8 to 40+ countries, making manual one-by-one monitoring unfeasible.
 
-Os dados são mockados para fins de demonstração. Em produção, viriam de uma API conectada a indexadores de blockchain (The Graph / Alchemy) e banco de dados de operações.
+Data is mocked for demonstration purposes. In production, it would come from an API connected to blockchain indexers (The Graph / Alchemy) and an operations database.
 
 ## Stack
 
 - React 18 + Vite
-- CSS-in-JS inline (sem dependências de estilo)
+- Inline CSS-in-JS (no style dependencies)
 - IBM Plex Mono + Space Grotesk (Google Fonts)
 
-## Rodar localmente
+## Run locally
 
 ```bash
 npm install
@@ -33,4 +33,4 @@ npm run dev
 
 ## Deploy
 
-Conecte o repositório ao [Vercel](https://vercel.com) — ele detecta automaticamente o Vite e faz o build.
+Connect the repository to [Vercel](https://vercel.com) — it automatically detects Vite and handles the build.
