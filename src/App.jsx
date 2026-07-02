@@ -24,11 +24,11 @@ const CURRENCY_MAP = {
   ECU: { code: "EC", name: "Equador",   flag: "🇪🇨", alert_threshold_minutes: 30 },
 };
 
-// Encode currency to bytes32 for eth_call
+// Encode currency to bytes32 for eth_call (browser-compatible)
 function encodeCurrency(currency) {
-  const hex = Buffer.from ? 
-    Buffer.from(currency).toString("hex") : 
-    Array.from(currency).map(c => c.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+  const hex = Array.from(currency)
+    .map(c => c.charCodeAt(0).toString(16).padStart(2, "0"))
+    .join("");
   return hex.padEnd(64, "0");
 }
 
