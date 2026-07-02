@@ -7,7 +7,7 @@ const DIAMOND_ADDRESS = "0x4cad6eC90e65baBec9335cAd728DDc610c316368";
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
 // Dune API — query 5279424 = [USDC+FIAT] Volume split by country (p2p.me)
-const DUNE_API_KEY = "1EYrmxLcDO7WzK3aJWGyGJ5Wf2MNm5wi";
+const DUNE_API_KEY = "COLOQUE_SUA_CHAVE_DUNE_AQUI";
 const DUNE_QUERY_ID = "5279424";
 const ORDER_COMPLETED_TOPIC = "0x507539023a7b6a713438d0f44eab4f97bcf8905b183b1108148409a8e8c1ed8c";
 
@@ -167,6 +167,7 @@ async function fetchOrderData() {
   );
   const data = await res.json();
   const rows = data?.result?.rows || [];
+  console.log("Dune rows:", JSON.stringify(rows.slice(0,20)));
 
   // rows: { order_month, currency, buy_order_amount, sell_order_amount, total_order_amount }
   const now = new Date();
