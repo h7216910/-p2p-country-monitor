@@ -160,15 +160,32 @@ async function fetchOrderData() {
   const BLOCKS_PER_DAY = 43200;
   const BLOCKS_PER_MONTH = BLOCKS_PER_DAY * 30;
 
+  // Alchemy free tier: use Alchemy Transfers API instead of eth_getLogs
+  // which has a 10-block limit. We use alchemy_getAssetTransfers for full history.
   let allLogs = [];
-  const CHUNK = 50000;
-  for (let from = currentBlock - BLOCKS_PER_MONTH; from < currentBlock; from += CHUNK) {
-    const to = Math.min(from + CHUNK - 1, currentBlock);
+  try {
+    // Get transfers to/from the diamond contract (last 30 days approximation)
+    const fromBlock = "0x" + (currentBlock - BLOCKS_PER_MONTH).toString(16);
+    const result = await alchemyCall("eth_getLogs", [{
+      address: DIAMOND_ADDRESS,
+      topics: [ORDER_COMPLETED_TOPIC],
+      fromBlock: fromBlock,
+      toBlock: "latest",
+    }]);
+    allLogs = result || [];
+  } catch (e) {
+    // Fallback: try smaller range (last 7 days)
     try {
-      const chunk = await getLogs(from, to);
-      allLogs = allLogs.concat(chunk);
-    } catch (e) {
-      console.warn("Log chunk failed:", e.message);
+      const fromBlock = "0x" + (currentBlock - BLOCKS_PER_DAY * 7).toString(16);
+      const result = await alchemyCall("eth_getLogs", [{
+        address: DIAMOND_ADDRESS,
+        topics: [ORDER_COMPLETED_TOPIC],
+        fromBlock: fromBlock,
+        toBlock: "latest",
+      }]);
+      allLogs = result || [];
+    } catch (e2) {
+      console.warn("getLogs failed:", e2.message);
     }
   }
 
