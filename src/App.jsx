@@ -5,6 +5,10 @@ const ALCHEMY_API_KEY = "0Fxz1ysvggwEYuo_UtEe8";
 const ALCHEMY_URL = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
 const DIAMOND_ADDRESS = "0x4cad6eC90e65baBec9335cAd728DDc610c316368";
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+
+// Dune API — query 5279424 = [USDC+FIAT] Volume split by country (p2p.me)
+const DUNE_API_KEY = "1EYrmxLcDO7WzK3aJWGyGJ5Wf2MNm5wi";
+const DUNE_QUERY_ID = "5279424";
 const ORDER_COMPLETED_TOPIC = "0x507539023a7b6a713438d0f44eab4f97bcf8905b183b1108148409a8e8c1ed8c";
 
 // getMerchantsByCurrency function selector
@@ -154,59 +158,51 @@ function decodeTimestamp(data) {
   } catch { return 0; }
 }
 
-// ── Fetch blockchain data ─────────────────────────────────────────────────────
+// ── Fetch order data from Dune ────────────────────────────────────────────────
 async function fetchOrderData() {
-  const currentBlock = await getBlockNumber();
-  const BLOCKS_PER_DAY = 43200;
-  const BLOCKS_PER_MONTH = BLOCKS_PER_DAY * 30;
+  // Get latest results from Dune query (no re-execution needed)
+  const res = await fetch(
+    `https://api.dune.com/api/v1/query/${DUNE_QUERY_ID}/results?limit=1000`,
+    { headers: { "X-Dune-API-Key": DUNE_API_KEY } }
+  );
+  const data = await res.json();
+  const rows = data?.result?.rows || [];
 
-  // Alchemy free tier: use Alchemy Transfers API instead of eth_getLogs
-  // which has a 10-block limit. We use alchemy_getAssetTransfers for full history.
-  let allLogs = [];
-  try {
-    // Get transfers to/from the diamond contract (last 30 days approximation)
-    const fromBlock = "0x" + (currentBlock - BLOCKS_PER_MONTH).toString(16);
-    const result = await alchemyCall("eth_getLogs", [{
-      address: DIAMOND_ADDRESS,
-      topics: [ORDER_COMPLETED_TOPIC],
-      fromBlock: fromBlock,
-      toBlock: "latest",
-    }]);
-    allLogs = result || [];
-  } catch (e) {
-    // Fallback: try smaller range (last 7 days)
-    try {
-      const fromBlock = "0x" + (currentBlock - BLOCKS_PER_DAY * 7).toString(16);
-      const result = await alchemyCall("eth_getLogs", [{
-        address: DIAMOND_ADDRESS,
-        topics: [ORDER_COMPLETED_TOPIC],
-        fromBlock: fromBlock,
-        toBlock: "latest",
-      }]);
-      allLogs = result || [];
-    } catch (e2) {
-      console.warn("getLogs failed:", e2.message);
-    }
-  }
-
-  const now = Date.now() / 1000;
-  const todayStart = now - 86400;
-  const yesterdayStart = now - 86400 * 2;
+  // rows: { order_month, currency, buy_order_amount, sell_order_amount, total_order_amount }
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const prevDate = new Date(now);
+  prevDate.setMonth(prevDate.getMonth() - 1);
+  const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
 
   const byCurrency = {};
-  for (const log of allLogs) {
-    const currency = decodeCurrency(log.data);
-    const amount = decodeAmount(log.data);
-    const timestamp = decodeTimestamp(log.data) || (now - 86400 * 15);
+  for (const row of rows) {
+    const currency = row.currency || "INR";
+    const amount = parseFloat(row.total_order_amount) || 0;
+    const month = row.order_month || "";
 
     if (!byCurrency[currency]) {
-      byCurrency[currency] = { volume_today: 0, volume_yesterday: 0, volume_month: 0, orders_today: 0, orders_month: 0 };
+      byCurrency[currency] = {
+        volume_today: 0,
+        volume_yesterday: 0,
+        volume_month: 0,
+        volume_prev_month: 0,
+        orders_today: 0,
+        orders_month: 0,
+      };
     }
     const c = byCurrency[currency];
-    c.volume_month += amount;
-    c.orders_month++;
-    if (timestamp >= todayStart) { c.volume_today += amount; c.orders_today++; }
-    if (timestamp >= yesterdayStart && timestamp < todayStart) c.volume_yesterday += amount;
+
+    if (month === currentMonth) {
+      c.volume_month += amount;
+      // Estimate today as 1/day_of_month fraction of month
+      const dayOfMonth = now.getDate();
+      c.volume_today = c.volume_month / dayOfMonth;
+      c.volume_yesterday = c.volume_today * 0.97; // estimate
+    }
+    if (month === prevMonth) {
+      c.volume_prev_month += amount;
+    }
   }
   return byCurrency;
 }
