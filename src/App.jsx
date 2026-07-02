@@ -80,6 +80,10 @@ async function getMerchantsData(currency) {
       { data, to: DIAMOND_ADDRESS },
       "latest"
     ]);
+    // DEBUG: log raw hex for a couple of currencies so we can properly decode the ABI later
+    if (["BRL", "NGN", "ARS"].includes(currency)) {
+      console.log(`[MERCHANTS:${currency}] raw eth_call result:`, result);
+    }
     return decodeMerchantsResult(result);
   } catch (e) {
     console.warn(`Failed to get merchants for ${currency}:`, e.message);
@@ -169,24 +173,29 @@ function decodeTimestamp(data) {
 }
 
 // ── Fetch from Dune ──────────────────────────────────────────────────────────
-async function duneQuery(queryId) {
+async function duneQuery(queryId, label) {
   const res = await fetch(
     `https://api.dune.com/api/v1/query/${queryId}/results?limit=2000`,
     { headers: { "X-Dune-API-Key": DUNE_API_KEY } }
   );
   const data = await res.json();
-  return data?.result?.rows || [];
+  const rows = data?.result?.rows || [];
+  // DEBUG: log the raw shape of the first row so we can see the real column names.
+  // Remove this once the mapping below is confirmed correct.
+  console.log(`[DUNE:${label}] query ${queryId} → ${rows.length} rows. First row:`, rows[0]);
+  if (data?.error) console.error(`[DUNE:${label}] API error:`, data.error);
+  return rows;
 }
 
 // ── Fetch order data from Dune ────────────────────────────────────────────────
 async function fetchOrderData() {
   // Fetch all queries in parallel
   const [volumeRows, dailyRows, orderRows, userRows, userCountryRows] = await Promise.all([
-    duneQuery(DUNE_QUERIES.volume_by_country),
-    duneQuery(DUNE_QUERIES.daily_volume),
-    duneQuery(DUNE_QUERIES.orders_by_country),
-    duneQuery(DUNE_QUERIES.weekly_users),
-    duneQuery(DUNE_QUERIES.users_by_country),
+    duneQuery(DUNE_QUERIES.volume_by_country, "volume_by_country"),
+    duneQuery(DUNE_QUERIES.daily_volume, "daily_volume"),
+    duneQuery(DUNE_QUERIES.orders_by_country, "orders_by_country"),
+    duneQuery(DUNE_QUERIES.weekly_users, "weekly_users"),
+    duneQuery(DUNE_QUERIES.users_by_country, "users_by_country"),
   ]);
 
   const rows = volumeRows;
@@ -357,7 +366,7 @@ function buildCountries(orderData, merchantData) {
         sell: md.sell_tiers?.length ? md.sell_tiers : defaultTiers,
       },
     };
-  }).filter(c => c.volume_month > 0 || c.merchants_online > 0);
+  }); // no longer filtering out zero-data countries — they should show as "sem dados" instead of disappearing
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
