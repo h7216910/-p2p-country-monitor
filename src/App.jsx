@@ -6,9 +6,15 @@ const ALCHEMY_URL = `https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`;
 const DIAMOND_ADDRESS = "0x4cad6eC90e65baBec9335cAd728DDc610c316368";
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
 
-// Dune API — query 5279424 = [USDC+FIAT] Volume split by country (p2p.me)
+// Dune API queries
 const DUNE_API_KEY = "1EYrmxLcDO7WzK3aJWGyGJ5Wf2MNm5wi";
-const DUNE_QUERY_ID = "5279424";
+const DUNE_QUERIES = {
+  volume_by_country: "5279424",   // [USDC+FIAT] Volume split by country (monthly)
+  daily_volume:      "5243366",   // Daily [USDC+FIAT] Volume
+  orders_by_country: "5414866",   // Order count - BUY, SELL & PAY by country
+  weekly_users:      "5279512",   // Weekly active users (new + active)
+  users_by_country:  "5279380",   // User count split by country
+};
 const ORDER_COMPLETED_TOPIC = "0x507539023a7b6a713438d0f44eab4f97bcf8905b183b1108148409a8e8c1ed8c";
 
 // getMerchantsByCurrency function selector
@@ -162,16 +168,28 @@ function decodeTimestamp(data) {
   } catch { return 0; }
 }
 
-// ── Fetch order data from Dune ────────────────────────────────────────────────
-async function fetchOrderData() {
-  // Get latest results from Dune query (no re-execution needed)
+// ── Fetch from Dune ──────────────────────────────────────────────────────────
+async function duneQuery(queryId) {
   const res = await fetch(
-    `https://api.dune.com/api/v1/query/${DUNE_QUERY_ID}/results?limit=1000`,
+    `https://api.dune.com/api/v1/query/${queryId}/results?limit=2000`,
     { headers: { "X-Dune-API-Key": DUNE_API_KEY } }
   );
   const data = await res.json();
-  const rows = data?.result?.rows || [];
-  console.log("Dune rows:", JSON.stringify(rows.slice(0,20)));
+  return data?.result?.rows || [];
+}
+
+// ── Fetch order data from Dune ────────────────────────────────────────────────
+async function fetchOrderData() {
+  // Fetch all queries in parallel
+  const [volumeRows, dailyRows, orderRows, userRows, userCountryRows] = await Promise.all([
+    duneQuery(DUNE_QUERIES.volume_by_country),
+    duneQuery(DUNE_QUERIES.daily_volume),
+    duneQuery(DUNE_QUERIES.orders_by_country),
+    duneQuery(DUNE_QUERIES.weekly_users),
+    duneQuery(DUNE_QUERIES.users_by_country),
+  ]);
+
+  const rows = volumeRows;
 
   // rows: { order_month, currency, buy_order_amount, sell_order_amount, total_order_amount }
   const now = new Date();
@@ -179,36 +197,87 @@ async function fetchOrderData() {
   const prevDate = new Date(now);
   prevDate.setMonth(prevDate.getMonth() - 1);
   const prevMonth = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, "0")}`;
+  const prevPrevDate = new Date(now);
+  prevPrevDate.setMonth(prevPrevDate.getMonth() - 2);
+  const prevPrevMonth = `${prevPrevDate.getFullYear()}-${String(prevPrevDate.getMonth() + 1).padStart(2, "0")}`;
 
-  const byCurrency = {};
+  // Group all rows by currency, summing across months
+  const byMonth = {}; // currency -> month -> amount
+
   for (const row of rows) {
     const currency = row.currency || "INR";
     const amount = parseFloat(row.total_order_amount) || 0;
     const month = row.order_month || "";
+    if (!byMonth[currency]) byMonth[currency] = {};
+    byMonth[currency][month] = (byMonth[currency][month] || 0) + amount;
+  }
 
-    if (!byCurrency[currency]) {
-      byCurrency[currency] = {
-        volume_today: 0,
-        volume_yesterday: 0,
-        volume_month: 0,
-        volume_prev_month: 0,
-        orders_today: 0,
-        orders_month: 0,
-      };
-    }
-    const c = byCurrency[currency];
+  const byCurrency = {};
+  const dayOfMonth = now.getDate();
 
+  for (const [currency, months] of Object.entries(byMonth)) {
+    const volume_month = months[currentMonth] || 0;
+    const volume_prev = months[prevMonth] || 0;
+    const dailyRate = dayOfMonth > 0 ? volume_month / dayOfMonth : 0;
+    const volume_same_day_last_month = volume_prev > 0 && dayOfMonth > 0
+      ? (volume_prev / new Date(prevDate.getFullYear(), prevDate.getMonth() + 1, 0).getDate()) * dayOfMonth
+      : null;
+
+    byCurrency[currency] = {
+      volume_today: dailyRate,
+      volume_yesterday: dailyRate * 0.97,
+      volume_month,
+      volume_same_day_last_month,
+      orders_today: 0,
+      orders_month: 0,
+      new_users_today: 0,
+      new_users_month: 0,
+      active_users: 0,
+    };
+  }
+
+  // ── Daily volume (real today/yesterday) ──────────────────────────────────
+  // dailyRows: { day, currency, total_volume } or similar
+  const todayStr = now.toISOString().slice(0, 10);
+  const yestDate = new Date(now); yestDate.setDate(yestDate.getDate() - 1);
+  const yestStr = yestDate.toISOString().slice(0, 10);
+
+  for (const row of dailyRows) {
+    const currency = row.currency || row.Currency || "";
+    const day = (row.day || row.date || row.block_date || "").slice(0, 10);
+    const amount = parseFloat(row.total_volume || row.volume || row.total_order_amount || 0);
+    if (!byCurrency[currency]) continue;
+    if (day === todayStr) byCurrency[currency].volume_today = amount;
+    if (day === yestStr)  byCurrency[currency].volume_yesterday = amount;
+  }
+
+  // ── Orders by country ────────────────────────────────────────────────────
+  // orderRows: { currency, order_month, order_count } or similar
+  for (const row of orderRows) {
+    const currency = row.currency || "";
+    const month = row.order_month || row.month || "";
+    const count = parseInt(row.order_count || row.count || row.total_orders || 0);
+    if (!byCurrency[currency]) continue;
     if (month === currentMonth) {
-      c.volume_month += amount;
-      // Estimate today as 1/day_of_month fraction of month
-      const dayOfMonth = now.getDate();
-      c.volume_today = c.volume_month / dayOfMonth;
-      c.volume_yesterday = c.volume_today * 0.97; // estimate
-    }
-    if (month === prevMonth) {
-      c.volume_prev_month += amount;
+      byCurrency[currency].orders_month = (byCurrency[currency].orders_month || 0) + count;
+      byCurrency[currency].orders_today = Math.round(count / dayOfMonth);
     }
   }
+
+  // ── Users by country ─────────────────────────────────────────────────────
+  // userCountryRows: { currency, new_users, active_users, total_users }
+  for (const row of userCountryRows) {
+    const currency = row.currency || "";
+    if (!byCurrency[currency]) continue;
+    byCurrency[currency].new_users_month = parseInt(row.new_users || 0);
+    byCurrency[currency].active_users = parseInt(row.active_users || row.total_users || 0);
+  }
+
+  // ── Weekly users (global new_users this week) ────────────────────────────
+  const latestWeek = userRows.sort((a, b) => (b.week || b.date || "").localeCompare(a.week || a.date || ""))[0] || {};
+  const globalNewUsersWeek = parseInt(latestWeek.new_users || 0);
+  const globalActiveUsers = parseInt(latestWeek.active_users || 0);
+
   return byCurrency;
 }
 
@@ -271,9 +340,11 @@ function buildCountries(orderData, merchantData) {
       ...meta,
       currency,
       volume_today, volume_yesterday, volume_month, volume_projected,
-      volume_same_day_last_month: null,
+      volume_same_day_last_month: od.volume_same_day_last_month || null,
       orders_today, orders_month, avg_order_value,
-      new_users_today: 0, new_users_month: 0, active_users: 0,
+      new_users_today: Math.round((od.new_users_month || 0) / Math.max(dayOfMonth, 1)),
+      new_users_month: od.new_users_month || 0,
+      active_users: od.active_users || 0,
       merchants_online: md.online || 0,
       merchants_offline: md.offline || 0,
       unaccepted_orders_today: 0,
