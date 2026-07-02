@@ -18,14 +18,18 @@ const CURRENCY_MAP = {
   BRL: { code: "BR", name: "Brasil",    flag: "🇧🇷", alert_threshold_minutes: 20 },
   ARS: { code: "AR", name: "Argentina", flag: "🇦🇷", alert_threshold_minutes: 30 },
   MXN: { code: "MX", name: "México",    flag: "🇲🇽", alert_threshold_minutes: 25 },
+  MEX: { code: "MX", name: "México",    flag: "🇲🇽", alert_threshold_minutes: 25 },
   COP: { code: "CO", name: "Colômbia",  flag: "🇨🇴", alert_threshold_minutes: 30 },
   PEN: { code: "PE", name: "Peru",      flag: "🇵🇪", alert_threshold_minutes: 35 },
   CLP: { code: "CL", name: "Chile",     flag: "🇨🇱", alert_threshold_minutes: 20 },
   VES: { code: "VE", name: "Venezuela", flag: "🇻🇪", alert_threshold_minutes: 45 },
+  VEN: { code: "VE", name: "Venezuela", flag: "🇻🇪", alert_threshold_minutes: 45 },
   INR: { code: "IN", name: "Índia",     flag: "🇮🇳", alert_threshold_minutes: 20 },
   IDR: { code: "ID", name: "Indonésia", flag: "🇮🇩", alert_threshold_minutes: 25 },
   NGN: { code: "NG", name: "Nigéria",   flag: "🇳🇬", alert_threshold_minutes: 30 },
   ECU: { code: "EC", name: "Equador",   flag: "🇪🇨", alert_threshold_minutes: 30 },
+  USD: { code: "EC", name: "Equador",   flag: "🇪🇨", alert_threshold_minutes: 30 },
+  EUR: { code: "EU", name: "Europa",    flag: "🇪🇺", alert_threshold_minutes: 30 },
 };
 
 // Encode currency to bytes32 for eth_call (browser-compatible)
@@ -223,8 +227,30 @@ function buildCountries(orderData, merchantData) {
   const dayOfMonth = new Date().getDate();
   const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
 
-  return Object.entries(CURRENCY_MAP).map(([currency, meta]) => {
-    const od = orderData[currency] || {};
+  // Deduplicate by country code (merge MEX+MXN, VES+VEN etc)
+  const seen = new Set();
+
+  return Object.entries(CURRENCY_MAP).filter(([currency, meta]) => {
+    if (seen.has(meta.code)) return false;
+    seen.add(meta.code);
+    return true;
+  }).map(([currency, meta]) => {
+    // Also check alias currencies (MEX for MX, VEN for VE etc)
+    const aliases = Object.entries(CURRENCY_MAP)
+      .filter(([c, m]) => m.code === meta.code)
+      .map(([c]) => c);
+    // Merge data from all alias currencies
+    const od = aliases.reduce((acc, c) => {
+      const d = orderData[c] || {};
+      return {
+        volume_today: (acc.volume_today||0) + (d.volume_today||0),
+        volume_yesterday: (acc.volume_yesterday||0) + (d.volume_yesterday||0),
+        volume_month: (acc.volume_month||0) + (d.volume_month||0),
+        orders_today: (acc.orders_today||0) + (d.orders_today||0),
+        orders_month: (acc.orders_month||0) + (d.orders_month||0),
+      };
+    }, {});
+    const _od_unused = orderData[currency] || {};
     const md = merchantData[currency] || {};
 
     const volume_today    = Math.round(od.volume_today || 0);
@@ -260,7 +286,7 @@ function buildCountries(orderData, merchantData) {
         sell: md.sell_tiers?.length ? md.sell_tiers : defaultTiers,
       },
     };
-  }).filter(c => c.orders_month > 0 || c.volume_today > 0 || c.merchants_online > 0);
+  }).filter(c => c.volume_month > 0 || c.merchants_online > 0);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
